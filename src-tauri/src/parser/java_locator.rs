@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 /// URL에서 Java 서비스 파일 경로와 메서드명, 라인 번호를 추론합니다.
 ///
@@ -59,6 +60,122 @@ pub fn locate_java_service(
         method_name: method_name.to_string(),
         method_line,
     })
+}
+
+/// URL 경로(쿼리·스킴 제거)가 `/system/` 으로 시작하는지 (대소문자 무시)
+pub fn is_system_prefixed_service_url(url: &str) -> bool {
+    extract_url_path_preserve_case(url)
+        .map(|p| p.to_lowercase().starts_with("/system/"))
+        .unwrap_or(false)
+}
+
+/// Diablo 등: `/system/foo/bar` → `com/shi/common/service` 하위 `FooService.java` 의 `bar` 메서드.
+pub fn locate_system_common_service(url: &str, root_path: &str) -> Result<JavaServiceLocation, String> {
+    let Some(path) = extract_url_path_preserve_case(url) else {
+        return Err("URL에서 경로를 추출할 수 없음".to_string());
+    };
+    let path_lc = path.to_lowercase();
+    if !path_lc.starts_with("/system/") {
+        return Err("URL이 /system/ 으로 시작하지 않음".to_string());
+    }
+    let rest = path[path_lc.find("/system/").unwrap() + "/system/".len()..].trim_matches('/');
+    let segments: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.len() < 2 {
+        return Err(format!(
+            "/system/ 이후 세그먼트가 2개 미만입니다: {rest}"
+        ));
+    }
+    let method_name = segments[segments.len() - 1].to_string();
+    let service_seg = segments[0];
+    let pascal = camel_segment_to_pascal_class_stem(service_seg);
+    let expected_filename = if pascal.ends_with("Service") {
+        format!("{}.java", pascal)
+    } else {
+        format!("{}Service.java", pascal)
+    };
+
+    let service_root = Path::new(root_path)
+        .join("src")
+        .join("java")
+        .join("com")
+        .join("shi")
+        .join("common")
+        .join("service");
+    if !service_root.is_dir() {
+        return Err(format!(
+            "common/service 경로가 없습니다: {}",
+            service_root.display()
+        ));
+    }
+
+    let exp_lower = expected_filename.to_lowercase();
+    let mut found: Option<PathBuf> = None;
+    for e in WalkDir::new(&service_root).into_iter().filter_map(|e| e.ok()) {
+        if !e.file_type().is_file() {
+            continue;
+        }
+        if e.path().extension().and_then(|x| x.to_str()) != Some("java") {
+            continue;
+        }
+        if e.file_name().to_string_lossy().to_lowercase() == exp_lower {
+            found = Some(e.path().to_path_buf());
+            break;
+        }
+    }
+
+    let java_file = found.ok_or_else(|| {
+        format!(
+            "common/service 에서 파일을 찾을 수 없음: {}",
+            expected_filename
+        )
+    })?;
+
+    let method_line = find_public_or_protected_method_line(&java_file, &method_name)?;
+
+    Ok(JavaServiceLocation {
+        java_file: java_file.to_string_lossy().to_string(),
+        method_name,
+        method_line,
+    })
+}
+
+fn extract_url_path_preserve_case(url: &str) -> Option<String> {
+    let mut path = url.trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    if let Some(q) = path.find('?') {
+        path.truncate(q);
+    }
+    if path.starts_with("http://") || path.starts_with("https://") {
+        let after_scheme = if path.starts_with("https://") {
+            &path[8..]
+        } else {
+            &path[7..]
+        };
+        let idx = after_scheme.find('/')?;
+        path = after_scheme[idx..].to_string();
+    }
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    Some(if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    })
+}
+
+/// `commonApproval` → `CommonApproval` (첫 글자 대문자, 이후 camel 유지)
+fn camel_segment_to_pascal_class_stem(seg: &str) -> String {
+    let mut out = String::with_capacity(seg.len());
+    let mut chars = seg.chars();
+    if let Some(c) = chars.next() {
+        out.push(c.to_ascii_uppercase());
+        out.extend(chars);
+    }
+    out
 }
 
 /// 경로의 각 컴포넌트를 대소문자 무시로 실제 디렉토리를 찾아 반환합니다.
@@ -136,4 +253,21 @@ pub struct JavaServiceLocation {
     pub java_file: String,
     pub method_name: String,
     pub method_line: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prefixed_detection() {
+        assert!(is_system_prefixed_service_url("/system/a/b"));
+        assert!(is_system_prefixed_service_url("https://ex.com/SYSTEM/foo/bar"));
+        assert!(!is_system_prefixed_service_url("/cmcs/0246/m"));
+    }
+
+    #[test]
+    fn camel_segment_to_pascal_first_only() {
+        assert_eq!(camel_segment_to_pascal_class_stem("commonApproval"), "CommonApproval");
+    }
 }

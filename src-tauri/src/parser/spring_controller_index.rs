@@ -8,14 +8,9 @@ use walkdir::WalkDir;
 
 use super::java_locator::JavaServiceLocation;
 
-const MAPPING_NAMES: &[&str] = &[
-    "RequestMapping",
-    "GetMapping",
-    "PostMapping",
-    "PutMapping",
-    "DeleteMapping",
-    "PatchMapping",
-];
+/// Spring 매핑 어노테이션 이름 (FQCN `.RequestMapping(` 도 `\bRequestMapping\s*\(` 로 매칭)
+const MAPPING_ANNOTATION_RE: &str =
+    r"\b(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)\s*\(";
 
 /// 정규화된 경로 키 → 동일 URL에 매핑된 핸들러 후보
 #[derive(Debug, Clone)]
@@ -165,7 +160,7 @@ impl SpringMappingIndex {
 }
 
 fn file_has_controller(content: &str) -> bool {
-    let re = Regex::new(r"@(?:Controller|RestController)\b").unwrap();
+    let re = Regex::new(r"@(?:[\w.]+\.)?(?:Controller|RestController)\b").unwrap();
     re.is_match(content)
 }
 
@@ -281,21 +276,25 @@ fn find_controller_class_line(lines: &[&str]) -> Option<usize> {
         r"^\s*(?:public|protected|private)?\s*(?:abstract\s+|static\s+|final\s+|sealed\s+|strictfp\s+)*class\s+(\w+)\b",
     )
     .ok()?;
+    let ctrl_re =
+        Regex::new(r"@(?:[\w.]+\.)?(?:Controller|RestController)\b").ok()?;
 
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
     for (idx, line) in lines.iter().enumerate() {
         if !class_re.is_match(line) {
             continue;
         }
         let win_lo = idx.saturating_sub(35);
         let window = lines[win_lo..=idx].join("\n");
-        if Regex::new(r"@(?:Controller|RestController)\b")
-            .ok()?
-            .is_match(&window)
-        {
-            return Some(idx);
+        if ctrl_re.is_match(&window) {
+            let lead = line.chars().take_while(|c| c.is_whitespace()).count();
+            candidates.push((idx, lead));
         }
     }
-    None
+    candidates
+        .into_iter()
+        .min_by_key(|(_, ws)| *ws)
+        .map(|(i, _)| i)
 }
 
 fn find_class_body_start_line(lines: &[&str], class_line: usize) -> Option<usize> {
@@ -405,38 +404,25 @@ fn extract_method_name(line: &str) -> Option<String> {
 }
 
 fn has_mapping_annotation(block: &str) -> bool {
-    MAPPING_NAMES.iter().any(|name| {
-        let re = Regex::new(&format!(r"@{}\\b", regex::escape(name))).unwrap();
-        re.is_match(block)
-    })
+    Regex::new(MAPPING_ANNOTATION_RE)
+        .ok()
+        .map(|re| re.is_match(block))
+        .unwrap_or(false)
 }
 
 fn extract_paths_from_annotation_block(block: &str) -> Vec<String> {
     let mut paths = Vec::new();
-    for name in MAPPING_NAMES {
-        let needle = format!("@{name}");
-        let mut search = 0usize;
-        while let Some(rel) = block[search..].find(&needle) {
-            let at = search + rel;
-            let after_needle = &block[at + needle.len()..];
-            let Some(open_rel) = after_needle.find('(') else {
-                search = at + needle.len();
-                continue;
-            };
-            if !after_needle[..open_rel].trim().is_empty() {
-                search = at + needle.len() + open_rel + 1;
-                continue;
-            }
-            let inner_start = at + needle.len() + open_rel + 1;
-            let inner_rest = &block[inner_start..];
-            let Some(close_rel) = find_matching_paren_end(inner_rest) else {
-                break;
-            };
-            let inner = &inner_rest[..close_rel];
-            let is_rm = *name == "RequestMapping";
-            paths.extend(extract_string_paths_from_args(inner, is_rm));
-            search = inner_start + close_rel + 1;
-        }
+    let re = Regex::new(MAPPING_ANNOTATION_RE).unwrap();
+    for cap in re.captures_iter(block) {
+        let m = cap.get(0).unwrap();
+        let name = cap.get(1).map(|g| g.as_str()).unwrap_or("RequestMapping");
+        let inner_rest = &block[m.end()..];
+        let Some(close_rel) = find_matching_paren_end(inner_rest) else {
+            continue;
+        };
+        let inner = &inner_rest[..close_rel];
+        let is_rm = name == "RequestMapping";
+        paths.extend(extract_string_paths_from_args(inner, is_rm));
     }
     paths.sort();
     paths.dedup();
@@ -661,5 +647,23 @@ mod tests {
         assert!(is_spring_do_style_url("/x.do"));
         assert!(is_spring_do_style_url("https://h/x.dox"));
         assert!(!is_spring_do_style_url("/a/b/c"));
+    }
+
+    #[test]
+    fn fqcn_restcontroller_requestmapping_indexes_dox_path() {
+        let src = r#"package com.example;
+@org.springframework.web.bind.annotation.RestController
+public class EpLoginController {
+    @org.springframework.web.bind.annotation.RequestMapping("/system/registePortalInfo.dox")
+    public void registerPortal() {}
+}
+"#;
+        let locs = index_java_file("EpLoginController.java", src);
+        let keys: Vec<&str> = locs.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(
+            keys.contains(&"/system/registeportalinfo.dox"),
+            "expected key in {:?}",
+            keys
+        );
     }
 }

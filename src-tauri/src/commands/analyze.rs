@@ -162,10 +162,11 @@ pub async fn analyze_actions(
             &typedef_map,
             &root_path,
             &spring_index,
+            false,
         );
         if let Some(dr) = &diablo_root {
             if r.analysis_type == AnalysisType::ActionSubmit && r.java_file.is_none() {
-                r = analyze_single_action(action, &typedef_map, dr, &spring_diablo);
+                r = analyze_single_action(action, &typedef_map, dr, &spring_diablo, true);
                 if r.java_file.is_some() {
                     r.service_url = service_url_with_diablo_prefix(r.service_url);
                 }
@@ -240,11 +241,13 @@ fn analyze_single_combo(combo: &ExtractedCombo) -> AnalysisResult {
 }
 
 /// 단일 Action에 대한 분석을 수행합니다.
+/// `use_system_common_heuristic`: Diablo 루트일 때 true — `/system/` 비-.do URL은 `common/service` 휴리스틱 후 typedef 폴백.
 fn analyze_single_action(
     action: &ExtractedAction,
     typedef_map: &HashMap<String, String>,
     root_path: &str,
     spring_index: &spring_controller_index::SpringMappingIndex,
+    use_system_common_heuristic: bool,
 ) -> AnalysisResult {
     let mut debug_logs = Vec::new();
 
@@ -361,34 +364,79 @@ fn analyze_single_action(
             }
         }
     } else {
-        match java_locator::locate_java_service(&service_url, typedef_map, root_path) {
-            Ok(loc) => loc,
-            Err(e) => {
-                let status = if e.contains("default_typedef.xml에서 찾을 수 없음") {
-                    AnalysisStatus::ManualCheck
-                } else {
-                    AnalysisStatus::Error
-                };
-                return AnalysisResult {
-                    result_id: action.result_id.clone(),
-                    action_id: action.action_id.clone(),
-                    xfdl_path: action.xfdl_path.clone(),
-                    xfdl_name: action.xfdl_name.clone(),
-                    service_url: Some(service_url),
-                    status,
-                    java_file: None,
-                    class_file: None,
-                    method_name: None,
-                    method_line: None,
-                    queries: vec![],
-                    error_msg: Some(e),
-                    debug_logs,
-                    analysis_type: AnalysisType::ActionSubmit,
-                    combo_param: None,
-                    is_common_code: None,
-                };
+        let try_system = use_system_common_heuristic
+            && java_locator::is_system_prefixed_service_url(&service_url);
+        let java_loc = if try_system {
+            match java_locator::locate_system_common_service(&service_url, root_path) {
+                Ok(loc) => {
+                    debug_logs.push(format!("common/service 휴리스틱: {:?}", loc));
+                    loc
+                }
+                Err(e_sys) => {
+                    debug_logs.push(format!(
+                        "common/service 휴리스틱 실패, typedef 경로 시도: {e_sys}"
+                    ));
+                    match java_locator::locate_java_service(&service_url, typedef_map, root_path) {
+                        Ok(loc) => loc,
+                        Err(e) => {
+                            let status = if e.contains("default_typedef.xml에서 찾을 수 없음") {
+                                AnalysisStatus::ManualCheck
+                            } else {
+                                AnalysisStatus::Error
+                            };
+                            return AnalysisResult {
+                                result_id: action.result_id.clone(),
+                                action_id: action.action_id.clone(),
+                                xfdl_path: action.xfdl_path.clone(),
+                                xfdl_name: action.xfdl_name.clone(),
+                                service_url: Some(service_url),
+                                status,
+                                java_file: None,
+                                class_file: None,
+                                method_name: None,
+                                method_line: None,
+                                queries: vec![],
+                                error_msg: Some(e),
+                                debug_logs,
+                                analysis_type: AnalysisType::ActionSubmit,
+                                combo_param: None,
+                                is_common_code: None,
+                            };
+                        }
+                    }
+                }
             }
-        }
+        } else {
+            match java_locator::locate_java_service(&service_url, typedef_map, root_path) {
+                Ok(loc) => loc,
+                Err(e) => {
+                    let status = if e.contains("default_typedef.xml에서 찾을 수 없음") {
+                        AnalysisStatus::ManualCheck
+                    } else {
+                        AnalysisStatus::Error
+                    };
+                    return AnalysisResult {
+                        result_id: action.result_id.clone(),
+                        action_id: action.action_id.clone(),
+                        xfdl_path: action.xfdl_path.clone(),
+                        xfdl_name: action.xfdl_name.clone(),
+                        service_url: Some(service_url),
+                        status,
+                        java_file: None,
+                        class_file: None,
+                        method_name: None,
+                        method_line: None,
+                        queries: vec![],
+                        error_msg: Some(e),
+                        debug_logs,
+                        analysis_type: AnalysisType::ActionSubmit,
+                        combo_param: None,
+                        is_common_code: None,
+                    };
+                }
+            }
+        };
+        java_loc
     };
 
     debug_logs.push(format!("Java Locator: {:?}", java_loc));
