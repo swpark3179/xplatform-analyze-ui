@@ -168,6 +168,13 @@ html, body, #root {
 }
 .card-body { padding: 18px; }
 
+details.card > summary {
+  user-select: none;
+}
+details.card > summary::-webkit-details-marker {
+  display: none;
+}
+
 /* ─── Buttons ─── */
 .btn {
   display: inline-flex;

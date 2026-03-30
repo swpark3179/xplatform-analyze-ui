@@ -66,6 +66,7 @@ function StepIndicator({ phase }: { phase: Phase }) {
 export default function App() {
   const [phase, setPhase] = useState<Phase>('select');
   const [rootPath, setRootPath] = useState('');
+  const [diabloRootPath, setDiabloRootPath] = useState('');
   const [xfdlFiles, setXfdlFiles] = useState<XfdlFile[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
@@ -144,6 +145,7 @@ export default function App() {
       const data = await invoke<AnalysisResult[]>('analyze_actions', {
         rootPath,
         xfdlPaths: Array.from(selectedPaths),
+        diabloRootPath: diabloRootPath.trim() ? diabloRootPath.trim() : null,
       });
       setResults(data);
       setPhase('result');
@@ -154,7 +156,7 @@ export default function App() {
       setIsAnalyzing(false);
       unlisten();
     }
-  }, [rootPath, selectedPaths]);
+  }, [rootPath, selectedPaths, diabloRootPath]);
 
 
 
@@ -277,6 +279,34 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            <details className="card" style={{ marginTop: 0 }}>
+              <summary
+                className="card-header"
+                style={{ cursor: 'pointer', listStyle: 'none' }}
+              >
+                Diablo 프로젝트 루트 (선택)
+              </summary>
+              <div className="card-body" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+                <FolderSelector
+                  rootPath={diabloRootPath}
+                  onChange={setDiabloRootPath}
+                  disabled={isScanning || isAnalyzing}
+                  dialogTitle="Diablo 프로젝트 루트 폴더 선택"
+                  emptyLabel="선택하지 않으면 메인 루트만으로 Java 분석합니다"
+                />
+                {diabloRootPath ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={isScanning || isAnalyzing}
+                    onClick={() => setDiabloRootPath('')}
+                  >
+                    선택 해제
+                  </button>
+                ) : null}
+              </div>
+            </details>
 
             {/* 파일 목록 */}
             {(phase === 'scan' || phase === 'choose') && (

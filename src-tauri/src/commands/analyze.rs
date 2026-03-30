@@ -13,12 +13,25 @@ use crate::parser::{
     xfdl_parser,
 };
 
+/// Diablo 루트에서 Java가 해결된 경우 `service_url` 앞에 `Diablo/` 접두사를 붙입니다.
+fn service_url_with_diablo_prefix(url: Option<String>) -> Option<String> {
+    url.map(|u| {
+        let u = u.trim();
+        if u.starts_with("Diablo/") {
+            return u.to_string();
+        }
+        let rest = u.trim_start_matches('/');
+        format!("Diablo/{rest}")
+    })
+}
+
 /// 선택된 XFDL 파일들을 분석하여 분석 결과를 반환합니다.
 #[tauri::command]
 pub async fn analyze_actions(
     app: AppHandle,
     root_path: String,
     xfdl_paths: Vec<String>,
+    diablo_root_path: Option<String>,
 ) -> Result<Vec<AnalysisResult>, String> {
     // 분석 시작 직후 상태 표시
     let _ = app.emit(
@@ -58,6 +71,27 @@ pub async fn analyze_actions(
         },
     );
     let spring_index = spring_controller_index::build_spring_mapping_index(&root_path)?;
+
+    let diablo_root = diablo_root_path
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let spring_diablo = if let Some(dr) = &diablo_root {
+        let _ = app.emit(
+            "analyze_progress",
+            AnalyzeProgress {
+                current: 0,
+                total: 0,
+                current_id: String::new(),
+                status: "Diablo Spring @Controller 매핑 인덱싱 중...".to_string(),
+            },
+        );
+        spring_controller_index::try_build_spring_mapping_index(dr)
+    } else {
+        spring_controller_index::SpringMappingIndex::empty()
+    };
 
     // 2) 각 XFDL 추출 → Action + Combo 목록 수집
     let mut all_actions: Vec<ExtractedAction> = Vec::new();
@@ -123,12 +157,21 @@ pub async fn analyze_actions(
                 status: format!("분석 중 ({}/{})", idx + 1, total),
             },
         );
-        results.push(analyze_single_action(
+        let mut r = analyze_single_action(
             action,
             &typedef_map,
             &root_path,
             &spring_index,
-        ));
+        );
+        if let Some(dr) = &diablo_root {
+            if r.analysis_type == AnalysisType::ActionSubmit && r.java_file.is_none() {
+                r = analyze_single_action(action, &typedef_map, dr, &spring_diablo);
+                if r.java_file.is_some() {
+                    r.service_url = service_url_with_diablo_prefix(r.service_url);
+                }
+            }
+        }
+        results.push(r);
     }
 
     // 4) Combo 분석 (Java 경로 분석 없음)

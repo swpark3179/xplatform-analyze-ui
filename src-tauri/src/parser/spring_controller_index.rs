@@ -119,7 +119,22 @@ pub fn build_spring_mapping_index(root_path: &str) -> Result<SpringMappingIndex,
     Ok(SpringMappingIndex { by_path })
 }
 
+/// `src/java`가 없거나 인덱스 구축에 실패하면 빈 인덱스 (옵션 Diablo 루트 등).
+pub fn try_build_spring_mapping_index(root_path: &str) -> SpringMappingIndex {
+    let java_root = Path::new(root_path).join("src").join("java");
+    if !java_root.is_dir() {
+        return SpringMappingIndex::empty();
+    }
+    build_spring_mapping_index(root_path).unwrap_or_else(|_| SpringMappingIndex::empty())
+}
+
 impl SpringMappingIndex {
+    pub fn empty() -> Self {
+        Self {
+            by_path: HashMap::new(),
+        }
+    }
+
     pub fn lookup(&self, service_url: &str) -> Result<JavaServiceLocation, SpringLookupError> {
         let Some(key) = normalize_url_key(service_url) else {
             return Err(SpringLookupError::NotFound);
