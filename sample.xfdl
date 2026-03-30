@@ -1,0 +1,61 @@
+<xml version="1.0" encoding="utf-8"?>
+<FDL version="1.4">
+	<TypeDefinition url="..\..\..\default_typeder.xml"/>
+	<Form id="CMCS0246" classname="Pattern_20" onload="form_onload">
+		<Layouts>
+			<Layout>
+				~~~
+			</Layout>
+			<Layout>
+				~~~
+			</Layout>
+		</Layouts>
+		<Objects>
+			<Dataset id="dsAction" firefirstcount="0" firenextcount="0" enableevent="true">
+				<ColumnInfo>
+					<Column id="ID" type="STRING" size="256"/>
+					<Column id="URL" type="STRING" size="256"/>
+					<Column id="IN_DS" type="STRING" size="256"/>
+					<Column id="OUT_DS" type="STRING" size="256"/>
+					<Column id="CALLBACK" type="STRING" size="256"/>
+					<Column id="ASYNC" type="STRING" size="256"/>
+				</ColumnInfo>
+				<Rows>
+					<Row>
+						<Col id="ID">selectGrdMainList</Col>
+						<Col id="URL">/cmcs/0246/selectGrdMainList</Col>
+						<Col id="OUT_DS">dsMain=dsMain</Col>
+						<Col id="CALLBACK">fnTransactionCallback</Col>
+						<Col id="ASYNC">Y</Col>
+					</Row>
+					<Row>
+						<Col id="ID">selectApprovalParam</Col>
+						<Col id="URL">/cmcs/0246/selectApprovalParam</Col>
+						<Col id="CALLBACK">fnTransactionCallback</Col>
+						<Col id="ASYNC">Y</Col>
+						<Col id="OUT_DS">dsFile=dsFile dsAppr=dsAppr dsMain=dsMain</Col>
+					</Row>
+				</Rows>
+			</Dataset>
+		</Objects>
+		<InitValue/>
+		<Bind/>
+		<Script type=xscript4.0"><![CDATA[/**
+* Program ID  : CMCS0246
+* Program Name : aaaa
+*/
+include "lib::common_ux.xjs";
+
+function form_onload(obj:Form, e:LoadEventInfo)
+{
+	getComCodeComboSync([divCondObj.cbSystem, "SYS|A"]
+						, [divCondObj.cbRepo, "CMCS0246Service.selectRepoSet|A", null, null]
+						);
+	initialize_ux(obj);
+	var param = getParamString(divCondObj.calChgDt, divCondObj.cbPrStat);
+	actionSubmit("selectGrdMainList", param);
+}
+
+]]></Script>
+</Form>
+</FDL>	
