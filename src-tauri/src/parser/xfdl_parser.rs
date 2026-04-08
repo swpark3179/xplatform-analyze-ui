@@ -2,8 +2,31 @@ use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use crate::models::{ExtractedAction, ExtractedCombo};
+
+static CDATA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<!\[CDATA\[(.*?)\]\]>").expect("CDATA 정규식 컴파일 실패"));
+
+static COMBO_FN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(getComCodeCombo|getComCodeComboSync|getGridCodeCombo|getGridCodeComboSync)\s*\(")
+        .expect("COMBO_FN 정규식 컴파일 실패")
+});
+
+static SECOND_ARG_STR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#",\s*(\"([^\"]*)\"|'([^']*)')"#).expect("SECOND_ARG_STR 정규식 컴파일 실패")
+});
+
+static ARRAY_SECOND_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\[\s*[^,\]]+\s*,\s*(\"([^\"]*)\"|'([^']*)')\s*\]"#)
+        .expect("ARRAY_SECOND 정규식 컴파일 실패")
+});
+
+static ACTION_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"actionSubmit(?:FR)?\s*\(\s*("([^"]+)"|'([^']+)'|([A-Za-z_$][A-Za-z0-9_$]*))"#)
+        .expect("ACTION_CALL 정규식 컴파일 실패")
+});
 
 /// XFDL 파일을 파싱하여 actionSubmit/actionSubmitFR 호출 목록과 dsAction URL 맵을 반환합니다.
 pub fn parse_xfdl(
@@ -62,29 +85,15 @@ pub fn extract_combo_calls(
     xfdl_path: &str,
     xfdl_name: &str,
 ) -> Result<Vec<ExtractedCombo>, String> {
-    let cdata_re = Regex::new(r"(?s)<!\[CDATA\[(.*?)\]\]>")
-        .map_err(|e| format!("정규식 컴파일 실패: {e}"))?;
-    // 함수명 그룹 + 괄호 열기까지
-    let combo_fn_re = Regex::new(
-        r"(getComCodeCombo|getComCodeComboSync|getGridCodeCombo|getGridCodeComboSync)\s*\(",
-    )
-    .map_err(|e| format!("정규식 컴파일 실패: {e}"))?;
-    // 형태 A: 두 번째 인자가 문자열 → 첫 인자 다음 콤마 뒤 문자열
-    let second_arg_str_re = Regex::new(r#",\s*(\"([^\"]*)\"|'([^']*)')"#)
-        .map_err(|e| format!("정규식 컴파일 실패: {e}"))?;
-    // 형태 B: 배열 내 두 번째 요소 ( [ ... , "X" ] 또는 [ ... , 'X' ] )
-    let array_second_re = Regex::new(r#"\[\s*[^,\]]+\s*,\s*(\"([^\"]*)\"|'([^']*)')\s*\]"#)
-        .map_err(|e| format!("정규식 컴파일 실패: {e}"))?;
-
     let mut combos = Vec::new();
     let mut combo_index = 0usize;
 
-    for cdata_cap in cdata_re.captures_iter(content) {
+    for cdata_cap in CDATA_RE.captures_iter(content) {
         let script = &cdata_cap[1];
         let mut pos = 0usize;
         while pos < script.len() {
             let rest = &script[pos..];
-            let Some(fn_cap) = combo_fn_re.captures(rest) else {
+            let Some(fn_cap) = COMBO_FN_RE.captures(rest) else {
                 break;
             };
             let fn_end = fn_cap.get(0).unwrap().end();
@@ -111,7 +120,7 @@ pub fn extract_combo_calls(
             let mut params: Vec<String> = Vec::new();
             if args.starts_with('[') {
                 // 형태 B: 인자가 배열(들)
-                for cap in array_second_re.captures_iter(args) {
+                for cap in ARRAY_SECOND_RE.captures_iter(args) {
                     let s = cap.get(2).or_else(|| cap.get(3)).map(|m| m.as_str().to_string());
                     if let Some(p) = s {
                         params.push(p);
@@ -119,7 +128,7 @@ pub fn extract_combo_calls(
                 }
             } else {
                 // 형태 A: 두 번째 인자가 문자열
-                if let Some(cap) = second_arg_str_re.captures(args) {
+                if let Some(cap) = SECOND_ARG_STR_RE.captures(args) {
                     let s = cap.get(2).or_else(|| cap.get(3)).map(|m| m.as_str().to_string());
                     if let Some(p) = s {
                         params.push(p);
@@ -245,19 +254,12 @@ fn extract_dsaction_urls(content: &str) -> (HashMap<String, String>, Option<Stri
 /// Script CDATA 내에서 actionSubmit / actionSubmitFR 호출을 추출합니다.
 /// 반환: Vec<(raw_action_id, is_literal)>
 fn extract_action_calls(content: &str) -> Result<Vec<(String, bool)>, String> {
-    let cdata_re = Regex::new(r"(?s)<!\[CDATA\[(.*?)\]\]>")
-        .map_err(|e| format!("정규식 컴파일 실패: {e}"))?;
-    let call_re = Regex::new(
-        r#"actionSubmit(?:FR)?\s*\(\s*("([^"]+)"|'([^']+)'|([A-Za-z_$][A-Za-z0-9_$]*))"#,
-    )
-    .map_err(|e| format!("정규식 컴파일 실패: {e}"))?;
-
     let mut results: Vec<(String, bool)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    for cdata_cap in cdata_re.captures_iter(content) {
+    for cdata_cap in CDATA_RE.captures_iter(content) {
         let script = &cdata_cap[1];
-        for cap in call_re.captures_iter(script) {
+        for cap in ACTION_CALL_RE.captures_iter(script) {
             let (action_id, is_literal) = if let Some(m) = cap.get(2).or_else(|| cap.get(3)) {
                 (m.as_str().to_string(), true)
             } else if let Some(m) = cap.get(4) {
