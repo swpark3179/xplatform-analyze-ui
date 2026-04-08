@@ -11,7 +11,10 @@ pub fn parse_xfdl(
     xfdl_name: &str,
 ) -> Result<(Vec<ExtractedAction>, Option<String>), String> {
     let content = std::fs::read_to_string(xfdl_path)
-        .map_err(|e| format!("파일 읽기 실패: {e}"))?;
+        .map_err(|e| {
+            eprintln!("[ERROR] XFDL 파일 읽기 실패 ({}): {e}", xfdl_path);
+            format!("XFDL 파일 읽기 실패 ({xfdl_name})")
+        })?;
 
     // 1) dsAction Dataset에서 ID → URL 맵 추출 (에러가 나더라도 중간까지 파싱된 정보 반환)
     let (url_map, parse_err) = extract_dsaction_urls(&content);
