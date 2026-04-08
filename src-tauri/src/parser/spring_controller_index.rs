@@ -644,9 +644,33 @@ mod tests {
 
     #[test]
     fn is_do_style() {
-        assert!(is_spring_do_style_url("/x.do"));
-        assert!(is_spring_do_style_url("https://h/x.dox"));
-        assert!(!is_spring_do_style_url("/a/b/c"));
+        // 기본 케이스
+        assert!(is_spring_do_style_url("/test.do"));
+        assert!(is_spring_do_style_url("/test.dox"));
+
+        // 대소문자 무시
+        assert!(is_spring_do_style_url("/test.DO"));
+        assert!(is_spring_do_style_url("/test.Dox"));
+        assert!(is_spring_do_style_url("/test.dOX"));
+
+        // 쿼리 파라미터 포함
+        assert!(is_spring_do_style_url("/test.do?id=123"));
+        assert!(is_spring_do_style_url("/api/v1/save.dox?mode=all&debug=true"));
+
+        // 프로토콜 포함 (Full URL)
+        assert!(is_spring_do_style_url("http://localhost:8080/app/main.do"));
+        assert!(is_spring_do_style_url("https://example.com/login.dox?redirect=/"));
+
+        // 공백 처리
+        assert!(is_spring_do_style_url("  /trimmed.do  "));
+
+        // 실패 케이스 (매칭되지 않음)
+        assert!(!is_spring_do_style_url("/test.jsp"));
+        assert!(!is_spring_do_style_url("/test.do.txt")); // 끝이 아님
+        assert!(!is_spring_do_style_url("/do/something")); // 확장자가 아님
+        assert!(!is_spring_do_style_url("/"));
+        assert!(!is_spring_do_style_url(""));
+        assert!(!is_spring_do_style_url("https://example.com")); // 경로 없음
     }
 
     #[test]
