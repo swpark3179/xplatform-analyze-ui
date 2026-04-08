@@ -51,10 +51,8 @@ pub async fn analyze_actions(
         .join("default_typedef.xml");
 
     if !typedef_path.exists() {
-        return Err(format!(
-            "default_typedef.xml 파일이 존재하지 않습니다: {}",
-            typedef_path.display()
-        ));
+        eprintln!("[ERROR] default_typedef.xml 파일이 존재하지 않습니다: {}", typedef_path.display());
+        return Err("default_typedef.xml 파일이 존재하지 않습니다.".to_string());
     }
 
     let typedef_map =

@@ -6,7 +6,10 @@ use std::collections::HashMap;
 /// url 속성이 "./"로 시작하는 <Service> 태그만 수집합니다.
 pub fn parse_typedef(typedef_path: &str) -> Result<HashMap<String, String>, String> {
     let content = std::fs::read_to_string(typedef_path)
-        .map_err(|e| format!("default_typedef.xml 읽기 실패: {e}"))?;
+        .map_err(|e| {
+            eprintln!("[ERROR] default_typedef.xml 읽기 실패 ({}): {e}", typedef_path);
+            "default_typedef.xml 읽기 실패".to_string()
+        })?;
 
     let mut reader = Reader::from_str(&content);
     reader.config_mut().trim_text(true);

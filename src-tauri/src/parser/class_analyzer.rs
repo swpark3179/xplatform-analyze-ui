@@ -142,7 +142,11 @@ pub fn analyze_class_with_extra(
     let mut logs: Vec<String> = Vec::new();
 
     let rel_path = extract_relative_path(java_file, "src/java/")
-        .ok_or_else(|| format!("Java 파일 경로에서 'src/java/' 를 찾을 수 없음: {java_file}"))?;
+        .ok_or_else(|| {
+            let filename = Path::new(java_file).file_name().and_then(|n| n.to_str()).unwrap_or(java_file);
+            eprintln!("[ERROR] Java 파일 경로에서 'src/java/' 를 찾을 수 없음: {java_file}");
+            format!("Java 파일 경로에서 'src/java/' 를 찾을 수 없음: {filename}")
+        })?;
 
     let stem = Path::new(&rel_path)
         .with_extension("")
@@ -154,13 +158,15 @@ pub fn analyze_class_with_extra(
     // [변경 1] 익명 클래스까지 모두 수집
     let class_files = find_all_class_files(&class_search_dir, &stem);
     if class_files.is_empty() {
-        return Err(format!(".class 파일을 찾을 수 없음: target/classes/{stem}*.class"));
+        return Err(format!(".class 파일을 찾을 수 없음: {stem}*.class"));
     }
 
-    logs.push(format!("[ANALYZER] Java  파일: {java_file}"));
+    let java_filename = Path::new(java_file).file_name().and_then(|n| n.to_str()).unwrap_or(java_file);
+    logs.push(format!("[ANALYZER] Java  파일: {java_filename}"));
     logs.push(format!("[ANALYZER] Class 파일 목록 ({} 개):", class_files.len()));
     for cf in &class_files {
-        logs.push(format!("  - {}", cf.display()));
+        let cf_name = cf.file_name().and_then(|n| n.to_str()).unwrap_or("[알 수 없음]");
+        logs.push(format!("  - {}", cf_name));
     }
 
     let mut references: Vec<MethodCall> = Vec::new();
@@ -176,14 +182,25 @@ pub fn analyze_class_with_extra(
 
     // [변경 2] ServiceCallback 익명 클래스의 doit 메서드도 분석 대상에 포함
     // $N 파일이 존재하면 해당 파일에서 doit 을 찾아야 하므로 전체 class 파일 루프 내에서 처리
-    let primary_class_file = class_files[0].display().to_string();
+    let primary_class_file = class_files[0]
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("[알 수 없음]")
+        .to_string();
 
     for class_file_path in &class_files {
+        let cf_name = class_file_path.file_name().and_then(|n| n.to_str()).unwrap_or("[알 수 없음]");
         let bytes = std::fs::read(class_file_path)
-            .map_err(|e| format!(".class 파일 읽기 실패 ({}): {e}", class_file_path.display()))?;
+            .map_err(|e| {
+                eprintln!("[ERROR] .class 파일 읽기 실패 ({}): {e}", class_file_path.display());
+                format!(".class 파일 읽기 실패 ({cf_name})")
+            })?;
 
         let parsed = parse_class(&bytes)
-            .map_err(|e| format!(".class 파싱 실패 ({}): {e:?}", class_file_path.display()))?;
+            .map_err(|e| {
+                eprintln!("[ERROR] .class 파싱 실패 ({}): {e:?}", class_file_path.display());
+                format!(".class 파싱 실패 ({cf_name})")
+            })?;
 
         // [변경 2] $N 파일은 doit 메서드를 자동 분석 (ServiceCallback 익명 클래스)
         let file_stem = class_file_path

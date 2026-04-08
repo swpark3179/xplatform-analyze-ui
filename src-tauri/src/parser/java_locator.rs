@@ -37,7 +37,10 @@ pub fn locate_java_service(
 
     // 대소문자 무시 탐색으로 실제 디렉토리 찾기
     let actual_dir = find_case_insensitive_dir(&base_java_dir)
-        .ok_or_else(|| format!("Java 기반 경로를 찾을 수 없음: {}", base_java_dir.display()))?;
+        .ok_or_else(|| {
+            eprintln!("[ERROR] Java 기반 경로를 찾을 수 없음: {}", base_java_dir.display());
+            format!("Java 기반 경로를 찾을 수 없음: com/shi/{}", url_path)
+        })?;
 
     // 파일명: {PREFIXID_대문자}{fileId}Service.java
     let expected_filename = format!("{}{}Service.java", prefix_id.to_uppercase(), file_id);
@@ -45,11 +48,8 @@ pub fn locate_java_service(
     // 대소문자 무시 파일 탐색
     let java_file = find_file_case_insensitive(&actual_dir, &expected_filename)
         .ok_or_else(|| {
-            format!(
-                "Java 서비스 파일을 찾을 수 없음: {} in {}",
-                expected_filename,
-                actual_dir.display()
-            )
+            eprintln!("[ERROR] Java 서비스 파일을 찾을 수 없음: {} in {}", expected_filename, actual_dir.display());
+            format!("Java 서비스 파일을 찾을 수 없음: {}", expected_filename)
         })?;
 
     // 메서드 라인 탐색
@@ -102,10 +102,8 @@ pub fn locate_system_common_service(url: &str, root_path: &str) -> Result<JavaSe
         .join("common")
         .join("service");
     if !service_root.is_dir() {
-        return Err(format!(
-            "common/service 경로가 없습니다: {}",
-            service_root.display()
-        ));
+        eprintln!("[ERROR] common/service 경로가 없습니다: {}", service_root.display());
+        return Err("common/service 경로가 없습니다 (com.shi.common.service)".to_string());
     }
 
     let exp_lower = expected_filename.to_lowercase();
@@ -230,7 +228,11 @@ fn find_public_method_line(java_file: &Path, method_name: &str) -> Result<u32, S
 /// `public` 또는 `protected` 메서드 시그니처에서 메서드명이 일치하는 줄(1-based)을 반환합니다.
 pub fn find_public_or_protected_method_line(java_file: &Path, method_name: &str) -> Result<u32, String> {
     let content = std::fs::read_to_string(java_file)
-        .map_err(|e| format!("Java 파일 읽기 실패: {e}"))?;
+        .map_err(|e| {
+            let fname = java_file.file_name().and_then(|n| n.to_str()).unwrap_or("[알 수 없음]");
+            eprintln!("[ERROR] Java 파일 읽기 실패 ({}): {e}", java_file.display());
+            format!("Java 파일 읽기 실패 ({fname})")
+        })?;
 
     let method_pattern = format!(" {}(", method_name);
 
